@@ -104,6 +104,28 @@ def get_provider_for_type(provider_type: str) -> BaseProvider:
     return resolve_provider(provider_type, app=None, settings=get_settings())
 
 
+def _parse_bearer_token(header: str) -> str:
+    """Extract and clean a token from an Authorization or x-api-key header value."""
+    token = header
+    if header.lower().startswith("bearer "):
+        token = header.split(" ", 1)[1]
+    if token and ":" in token:
+        token = token.split(":", 1)[0]
+    return token
+
+
+def _extract_client_token(request: Request) -> str:
+    """Extract a client auth token from the request for passthrough mode."""
+    header = (
+        request.headers.get("x-api-key")
+        or request.headers.get("authorization")
+        or request.headers.get("anthropic-auth-token")
+    )
+    if not header:
+        raise HTTPException(status_code=401, detail="Missing API key")
+    return _parse_bearer_token(header)
+
+
 def require_api_key(
     request: Request, settings: Settings = Depends(get_settings)
 ) -> str:
@@ -117,7 +139,10 @@ def require_api_key(
     """
     anthropic_auth_token = settings.anthropic_auth_token
     if not anthropic_auth_token:
-        # No API key configured -> allow
+        # No server auth configured. In passthrough mode, still extract the
+        # client token from the request header so it can be forwarded upstream.
+        if settings.enable_api_key_passthrough:
+            return _extract_client_token(request)
         return ""
 
     header = (
@@ -128,14 +153,7 @@ def require_api_key(
     if not header:
         raise HTTPException(status_code=401, detail="Missing API key")
 
-    # Support both raw key in X-API-Key and Bearer token in Authorization
-    token = header
-    if header.lower().startswith("bearer "):
-        token = header.split(" ", 1)[1]
-
-    # Strip anything after the first colon to handle tokens with appended model names
-    if token and ":" in token:
-        token = token.split(":", 1)[0]
+    token = _parse_bearer_token(header)
 
     # Constant-time comparison to avoid leaking the configured token via
     # response-time differences on a per-byte mismatch (CWE-208).
