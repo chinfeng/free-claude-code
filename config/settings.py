@@ -330,6 +330,12 @@ class Settings(BaseSettings):
     anthropic_auth_token: str = Field(
         default="", validation_alias="ANTHROPIC_AUTH_TOKEN"
     )
+    # When true, the client's auth token is passed through as the upstream
+    # provider bearer token, eliminating the need for separate per-provider
+    # API keys. Requires ANTHROPIC_AUTH_TOKEN to be set.
+    enable_api_key_passthrough: bool = Field(
+        default=False, validation_alias="ENABLE_API_KEY_PASSTHROUGH"
+    )
 
     @model_validator(mode="before")
     @classmethod

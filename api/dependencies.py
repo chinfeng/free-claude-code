@@ -33,6 +33,7 @@ def resolve_provider(
     *,
     app: Starlette | None,
     settings: Settings,
+    passthrough_api_key: str = "",
 ) -> BaseProvider:
     """Resolve a provider using the app-scoped registry when ``app`` is set.
 
@@ -43,6 +44,10 @@ def resolve_provider(
 
     When ``app`` is ``None`` (no HTTP context), uses the process-level
     :data:`_providers` cache only.
+
+    When ``passthrough_api_key`` is non-empty and
+    ``settings.enable_api_key_passthrough`` is True, the client's auth token
+    replaces per-provider credentials in the upstream request.
     """
     if app is not None:
         reg = getattr(app.state, "provider_registry", None)
@@ -51,16 +56,27 @@ def resolve_provider(
                 "Provider registry is not configured. Ensure AppRuntime startup ran "
                 "or assign app.state.provider_registry for test apps."
             )
-        return _resolve_with_registry(reg, provider_type, settings)
+        return _resolve_with_registry(
+            reg, provider_type, settings, passthrough_api_key=passthrough_api_key
+        )
     return _resolve_with_registry(ProviderRegistry(_providers), provider_type, settings)
 
 
 def _resolve_with_registry(
-    registry: ProviderRegistry, provider_type: str, settings: Settings
+    registry: ProviderRegistry,
+    provider_type: str,
+    settings: Settings,
+    *,
+    passthrough_api_key: str = "",
 ) -> BaseProvider:
-    should_log_init = not registry.is_cached(provider_type)
+    cache_key = provider_type
+    if passthrough_api_key and settings.enable_api_key_passthrough:
+        cache_key = f"{provider_type}:{passthrough_api_key}"
+    should_log_init = not registry.is_cached(cache_key)
     try:
-        provider = registry.get(provider_type, settings)
+        provider = registry.get(
+            provider_type, settings, passthrough_api_key=passthrough_api_key
+        )
     except AuthenticationError as e:
         # Provider :class:`~providers.exceptions.AuthenticationError` messages are
         # curated configuration hints (env var names, docs links), not upstream noise.
@@ -90,16 +106,19 @@ def get_provider_for_type(provider_type: str) -> BaseProvider:
 
 def require_api_key(
     request: Request, settings: Settings = Depends(get_settings)
-) -> None:
+) -> str:
     """Require a server API key (Anthropic-style).
 
     Checks `x-api-key` header or `Authorization: Bearer ...` against
     `Settings.anthropic_auth_token`. If `ANTHROPIC_AUTH_TOKEN` is empty, this is a no-op.
+
+    Returns the extracted client token for pass-through when
+    ``ENABLE_API_KEY_PASSTHROUGH`` is active.
     """
     anthropic_auth_token = settings.anthropic_auth_token
     if not anthropic_auth_token:
         # No API key configured -> allow
-        return
+        return ""
 
     header = (
         request.headers.get("x-api-key")
@@ -124,6 +143,8 @@ def require_api_key(
         token.encode("utf-8"), anthropic_auth_token.encode("utf-8")
     ):
         raise HTTPException(status_code=401, detail="Invalid API key")
+
+    return token
 
 
 def get_provider() -> BaseProvider:

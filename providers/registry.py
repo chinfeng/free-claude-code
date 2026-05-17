@@ -149,10 +149,16 @@ def _require_credential(descriptor: ProviderDescriptor, credential: str) -> None
 
 
 def build_provider_config(
-    descriptor: ProviderDescriptor, settings: Settings
+    descriptor: ProviderDescriptor,
+    settings: Settings,
+    *,
+    passthrough_api_key: str = "",
 ) -> ProviderConfig:
-    credential = _credential_for(descriptor, settings)
-    _require_credential(descriptor, credential)
+    if passthrough_api_key and settings.enable_api_key_passthrough:
+        credential = passthrough_api_key
+    else:
+        credential = _credential_for(descriptor, settings)
+        _require_credential(descriptor, credential)
     base_url = _string_attr(
         settings, descriptor.base_url_attr, descriptor.default_base_url or ""
     )
@@ -173,7 +179,12 @@ def build_provider_config(
     )
 
 
-def create_provider(provider_id: str, settings: Settings) -> BaseProvider:
+def create_provider(
+    provider_id: str,
+    settings: Settings,
+    *,
+    passthrough_api_key: str = "",
+) -> BaseProvider:
     descriptor = PROVIDER_DESCRIPTORS.get(provider_id)
     if descriptor is None:
         supported = "', '".join(PROVIDER_DESCRIPTORS)
@@ -181,7 +192,9 @@ def create_provider(provider_id: str, settings: Settings) -> BaseProvider:
             f"Unknown provider_type: '{provider_id}'. Supported: '{supported}'"
         )
 
-    config = build_provider_config(descriptor, settings)
+    config = build_provider_config(
+        descriptor, settings, passthrough_api_key=passthrough_api_key
+    )
     factory = PROVIDER_FACTORIES.get(provider_id)
     if factory is None:
         raise AssertionError(f"Unhandled provider descriptor: {provider_id}")
@@ -267,10 +280,23 @@ class ProviderRegistry:
         """Return whether a provider for this id is already in the cache."""
         return provider_id in self._providers
 
-    def get(self, provider_id: str, settings: Settings) -> BaseProvider:
-        if provider_id not in self._providers:
-            self._providers[provider_id] = create_provider(provider_id, settings)
-        return self._providers[provider_id]
+    def get(
+        self,
+        provider_id: str,
+        settings: Settings,
+        *,
+        passthrough_api_key: str = "",
+    ) -> BaseProvider:
+        # When pass-through is active, include the API key in the cache key
+        # so different client tokens get distinct provider instances.
+        cache_key = provider_id
+        if passthrough_api_key and settings.enable_api_key_passthrough:
+            cache_key = f"{provider_id}:{passthrough_api_key}"
+        if cache_key not in self._providers:
+            self._providers[cache_key] = create_provider(
+                provider_id, settings, passthrough_api_key=passthrough_api_key
+            )
+        return self._providers[cache_key]
 
     def cache_model_ids(self, provider_id: str, model_ids: Iterable[str]) -> None:
         """Store a provider model-list result for later instant API responses."""
