@@ -32,6 +32,7 @@ def _settings(**overrides):
         "lm_studio_base_url": "",
         "llamacpp_base_url": "",
         "ollama_base_url": "http://localhost:11434",
+        "openai_api_key": "",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -157,7 +158,7 @@ def test_provider_smoke_model_override_accepts_owner_model_name(
     assert models[0].source == "FCC_SMOKE_MODEL_NVIDIA_NIM"
 
 
-def test_provider_smoke_model_override_rejects_wrong_provider_prefix(
+def test_provider_smoke_model_override_normalizes_cross_provider_prefix(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("FCC_SMOKE_MODEL_DEEPSEEK", "ollama/llama3.1")
@@ -169,12 +170,10 @@ def test_provider_smoke_model_override_rejects_wrong_provider_prefix(
         provider_matrix=frozenset({"deepseek"}),
     )
 
-    try:
-        config.provider_smoke_models()
-    except ValueError as exc:
-        assert "FCC_SMOKE_MODEL_DEEPSEEK" in str(exc)
-    else:
-        raise AssertionError("expected wrong provider prefix to fail")
+    models = config.provider_smoke_models()
+
+    assert models[0].full_model == "deepseek/ollama/llama3.1"
+    assert models[0].source == "FCC_SMOKE_MODEL_DEEPSEEK"
 
 
 def test_provider_smoke_matrix_filters_provider_catalog(monkeypatch) -> None:
@@ -248,13 +247,10 @@ def test_nvidia_nim_cli_models_reject_empty_override() -> None:
         raise AssertionError("expected empty NVIDIA NIM CLI model override to fail")
 
 
-def test_nvidia_nim_cli_models_reject_wrong_provider_prefix() -> None:
-    try:
-        nvidia_nim_cli_model_refs({"FCC_SMOKE_NIM_MODELS": "open_router/model"})
-    except ValueError as exc:
-        assert "nvidia_nim" in str(exc)
-    else:
-        raise AssertionError("expected wrong provider prefix to fail")
+def test_nvidia_nim_cli_models_normalize_cross_provider_prefix() -> None:
+    refs = nvidia_nim_cli_model_refs({"FCC_SMOKE_NIM_MODELS": "open_router/model"})
+
+    assert "nvidia_nim/open_router/model" in refs
 
 
 def test_smoke_config_returns_nvidia_nim_cli_provider_models(monkeypatch) -> None:
@@ -320,15 +316,12 @@ def test_openrouter_free_cli_models_reject_empty_override() -> None:
         raise AssertionError("expected empty OpenRouter free CLI override to fail")
 
 
-def test_openrouter_free_cli_models_reject_wrong_provider_prefix() -> None:
-    try:
-        openrouter_free_cli_model_refs(
-            {"FCC_SMOKE_OPENROUTER_FREE_MODELS": "nvidia_nim/model"}
-        )
-    except ValueError as exc:
-        assert "open_router" in str(exc)
-    else:
-        raise AssertionError("expected wrong provider prefix to fail")
+def test_openrouter_free_cli_models_normalize_cross_provider_prefix() -> None:
+    refs = openrouter_free_cli_model_refs(
+        {"FCC_SMOKE_OPENROUTER_FREE_MODELS": "nvidia_nim/model"}
+    )
+
+    assert "open_router/nvidia_nim/model" in refs
 
 
 def test_smoke_config_returns_openrouter_free_cli_provider_models(monkeypatch) -> None:

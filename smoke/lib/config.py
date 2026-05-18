@@ -286,12 +286,6 @@ def _normalize_provider_model(provider: str, raw_model: str) -> str:
     prefix = Settings.parse_provider_type(model)
     if prefix == provider:
         return model
-    if prefix in SUPPORTED_PROVIDER_IDS:
-        msg = (
-            f"FCC_SMOKE_MODEL_{provider.upper()} must use provider prefix "
-            f"{provider!r}, got {model!r}"
-        )
-        raise ValueError(msg)
     return f"{provider}/{model}"
 
 
